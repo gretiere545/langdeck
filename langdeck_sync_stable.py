@@ -389,9 +389,9 @@ wb  = gc.open_by_url(sheet)
 vk_languages = get_list_languages()
 
 #---- Base Airtable
-api_key_airtable = "keyrI98TIqu6mbFcf" 
+api_key_airtable = "******" 
 headers = {"Authorization": "Bearer " + api_key_airtable,"Content-Type" : "application/json"}
-base_id = "appawT3gg7cJhPYv0" # Base Nouvelle HV
+base_id = "******" # Base Nouvelle HV
 table_name = 'Corpus'
 airtable = Airtable(base_id, table_name, api_key_airtable)
 
