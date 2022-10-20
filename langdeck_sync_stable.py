@@ -450,7 +450,10 @@ def get_larousse (text):
     s = "à renseigner"
   return s
 
-"""# Corpus"""
+"""# Corpus
+
+## Corpus expressions
+"""
 
 #---- Base GSheet
 api_key_gmail = "keysgpJWq3aWwqSZe"
@@ -478,7 +481,6 @@ df_airt_corpus = get_airt_corpus()
 df_airt_corpus["pivot_en"]=df_airt_corpus[["vocabulary_unit","pivot_en"]].apply(lambda x:set_airt_pivot_en(x[0]) if pd.isna(x[1]) else x[1], axis=1)
 #---- pivot (fr) manquant
 df_airt_corpus["pivot"]=df_airt_corpus[["vocabulary_unit","pivot"]].apply(lambda x:set_airt_pivot_fr(x[0]) if pd.isna(x[1]) else x[1], axis=1)
-
 #======================================================= 
 #---- Transposition des colonnes de langues en lignes
 #=======================================================
@@ -505,7 +507,6 @@ df_airt_corpus.rename(columns={"pivot":"translation_pivot_fr",
                                "rank":"ordre",
                                "vocabulary_unit":"expression",
                                "alphabet":"idx"}, inplace=True)
-
 #---- on charge la base corpus de langdeck (Gsheet)
 df_lgdk_corpus = get_lgdk_corpus()
 df_lgdk_corpus.drop (["translation_pivot_fr","translation_pivot_en"], axis=1, inplace=True)
@@ -562,7 +563,7 @@ df_lgdk_corpus.drop(["pending"], axis=1, inplace=True)
 # Save to GSheet
 save_df_to_gsheet ("t_corpus_all_entries", df_lgdk_corpus)
 
-"""# Corpus Lemme
+"""## Corpus lemmes
 Indexé sur le Lemme
 """
 
@@ -625,7 +626,7 @@ def f_update_head(lemma):
 
   return pd.Series([r1, r2, r3])
 
-"""## Append : Ajout des nouvelles lignes Headword (Lemme)"""
+"""### Ajout des nouveaux lemmes"""
 
 # DF des enregistrements dans AT et pas dans GS
 df_head_newlines = df_airt_lemma[(~df_airt_lemma["vocabulary_unit"].isin(df_corpus_head["terme_pref"])) & (df_airt_lemma["headword"]==True)]
@@ -649,130 +650,14 @@ for index, row in df_head_newlines.iterrows():
   df_corpus_head = df_corpus_head.append(d, ignore_index = True)
 
 # apprès ajout, il faut recharger ce DF
-df_head_lines = df_airt_lemma[(df_airt_lemma["vocabulary_unit"].isin(df_corpus_head["terme_pref"])) & (df_airt_lemma["headword"]==True)]
-
+df_head_lines = df_airt_lemma[(df_airt_lemma["vocabulary_unit"].isin(df_corpus_head["terme_pref"])) & (df_airt_lemma["headword"]==True)]  
 df_corpus_head["definition"] = df_corpus_head[["terme_pref","definition"]].apply(lambda x:get_larousse(x[0]) if x[1]=="" else x[1], axis=1)
 # #### Mide à jour des lignes existantes Head
 df_corpus_head[["uid","translation_pivot_en","content"]] = df_corpus_head["terme_pref"].apply(lambda x:f_update_head(x))
 # on sauve dans GSheet
 save_df_to_gsheet ("t_corpus_head", df_corpus_head)
 
-# on enregiste
-save_df_to_gsheet ("t_ec_vocabulary", df_vocab)
-
-
-
-
-
-
-
-"""# Corpus : Traductions Google
-
-dict_vendor =[
-    {"vendor-code":"11", "vendor-abbv":"neuml","vendor-name":"txtai(Neuml)","pivot":"en", "f":"fetch_deep_tlr_txtai"},
-    {"vendor-code":"12", "vendor-abbv":"google","vendor-name":"GoogleTranslator","pivot":"en", "f":"fetch_deep_tlr_google"},
-    {"vendor-code":"13", "vendor-abbv":"pons","vendor-name":"Pons","pivot":"fr", "f":"fetch_deep_tlr_pons"},   
-    {"vendor-code":"14", "vendor-abbv":"deepl","vendor-name":"DeepL","pivot":"en", "f":"fetch_deep_tlr_deepl"}
-]  
-df_lang_vendor = pd.DataFrame(vk_languages)
-
-def translation_google (input, language, language_filter, iso_code, ai_code,langue_pivot):
-  from deep_translator import GoogleTranslator
-  translation = input
-  state = 0 #par défaut
-  if language == language_filter:
-    translation = ""
-    try:
-      translation = GoogleTranslator(source=langue_pivot, target=iso_code).translate(input)
-      if translation != "":
-        print (input + "("+ langue_pivot +") "+ " : " + translation)
-        state = 0 #found
-    except Exception as e:
-      print (e)
-      translation = ""
-      pass
-  else:
-    ai_code = 0
-  return translation, state, ai_code
-
-
-
-def translation_deepl (input, language, language_filter, iso_code, ai_code,langue_pivot):
-  from deep_translator import DeeplTranslator
-  translation = input
-  state = 0 #par défaut
-
-  if language == language_filter:
-    translation = ""
-    try:
-      translation = DeeplTranslator(api_key="ea9751e0-a036-d65e-14af-3169e96b11e4:fx", source=langue_pivot, target=iso_code, use_free_api=True).translate(input)
-      if translation != "":
-        print (input + "("+ langue_pivot +") "+ " : " + translation)
-        state = 0 #found
-    except Exception as e:
-      print (e)
-      translation = ""
-      pass
-  else:
-    ai_code = 0
-
-  return translation, state, ai_code
-
-def call_nlp_google (language, iso_code, vc, langue_pivot, df_langdeck_ai_temp):
-  from deep_translator import GoogleTranslator
-  if len(df_langdeck_ai_temp) > 0:
-    df_langdeck_ai_temp[["translation_ai","translation_state","translation_ai_source"]] = df_langdeck_ai_temp[["translation_pivot","expression","language","translation_state"]].apply(
-        lambda x:translation_google(x[0],x[2],language, iso_code, vc, langue_pivot), 
-        axis=1, 
-        result_type="expand")
-  df_google = df_langdeck_ai_temp.copy()   
-  return df_google   
-
-def call_nlp_deepl (language, iso_code, vc, langue_pivot, df_langdeck_ai_temp):
-  from deep_translator import DeeplTranslator
-  if len(df_langdeck_ai_temp) > 0:
-    df_langdeck_ai_temp[["translation_ai","translation_state","translation_ai_source"]] = df_langdeck_ai_temp[["translation_pivot","expression","language","translation_state"]].apply(
-        lambda x:translation_deepl(x[0],x[2], language, iso_code, vc, langue_pivot), 
-        axis=1, 
-        result_type="expand")
-  df_deepl = df_langdeck_ai_temp.copy()
-  return df_deepl
-
-def call_nlp_language_vendor (language, iso_code, vc, langue_pivot):
-  # dataframe temporaire pour chaque appel IA
-  df_langdeck_ai_temp = df_lgdk_corpus.copy()
-  df_langdeck_ai_temp["translation_pivot"]=df_langdeck_ai_temp[["translation_pivot_fr","translation_pivot_en"]].apply(lambda x:x[0] if langue_pivot=="fr" else x[1] , axis=1)  
-  # ajout d'un uid par concaténation des 3 clés
-  df_langdeck_ai_temp["uid"] = df_langdeck_ai_temp["hash"].map(str) + vc 
-  df_langdeck_ai_temp = df_langdeck_ai_temp [["uid","hash","maitre","expression","language","translation","translation_pivot","translation_state","translation_ai_source"]]
-  df_langdeck_ai_temp["translation_ai"]=""
-  df_langdeck_ai_temp["translation_state"]=2
-  df_langdeck_ai_temp["tr_pivot_lang"]=langue_pivot
-
-  lists=[]
-  # on ajoute les entrées qui sont forcées dans Airtable (pending==True)
-  df_vkat = df_airt_corpus.copy()
-  df_append=df_vkat.loc[df_vkat["pending"]==True]
-  df_force_new_trad = df_langdeck_ai_temp.loc[(df_langdeck_ai_temp["uid"].isin(df_append["uid"])) & (df_langdeck_ai_temp["language"]==language)]
-  lists.append(df_force_new_trad)
-  # on exclut les entrées déjà renseignées par l'iA
-  df_langdeck_diff = df_langdeck_ai_temp.loc[(~df_langdeck_ai_temp["uid"].isin(df_corpus_nlp["uid"])) & (df_langdeck_ai_temp["language"]==language)]
-  lists.append(df_langdeck_diff)
-  df_langdeck_ai_temp = pd.concat(lists)
-  # on appelle la traduction IA si :
-  # - le uid n'existe pas dans la DF IA df_corpus_nlp
-  # - le filtre est positionné  
-  #df_langdeck_ai_temp = df_langdeck_ai_temp.head()
-  for dic in dict_vendor:
-    if dic["vendor-code"]==vc:
-      if dic["vendor-abbv"]=="google":
-        df_google = call_nlp_google (language, iso_code, vc, langue_pivot, df_langdeck_ai_temp)
-        df_return = df_google
-      elif dic["vendor-abbv"]=="deepl":
-        df_deepl = call_nlp_deepl (language, iso_code, vc, langue_pivot, df_langdeck_ai_temp)
-        df_return = df_deepl
-  return df_return
-"""
+"""## Corpus : Traductions Google"""
 
 df_corpus_nlp = load_df_from_gsheet ("t_corpus_nlp")
 df_corpus_nlp = df_corpus_nlp[["uid","hash","maitre","expression","language","translation","translation_pivot","tr_pivot_lang","translation_state","translation_ai_source","translation_ai"]]	
@@ -784,13 +669,10 @@ df_langdeck_ai_temp["translation_pivot"]=df_langdeck_ai_temp[["translation_pivot
 # liste complète : 
 vk_filter = list(map(lambda d: d["trigramme"], vk_languages))
 
-
-
 # concaténation des dataframes
 frames =[]
 frames.append(df_corpus_nlp)
-
-vk_languages = get_list_languages()
+vk_languages = get_list_languages() 
 
 for FILTER_LANG in vk_filter:
   for dic in vk_languages:
@@ -833,11 +715,6 @@ for FILTER_LANG in vk_filter:
         frames.append(df_trad_nlp)
         #frames.append(df_return)
 
-"""algorithme : on cherche tous les enreg. de nlp
-
-START HERE
-"""
-
 # quand tout a été itéré, on concatène    
 df_corpus_trad_ai = pd.concat(frames)
 # on uniformise le type
@@ -868,7 +745,7 @@ df_lgdk_corpus["translation_ai_source"] = df_lgdk_corpus["translation_ai_source"
 # on enregistre dans GSheet
 save_df_to_gsheet ("t_corpus_all_entries", df_lgdk_corpus)
 
-"""# Vue Lexique Thématique
+"""# Lexique Thématique
 *Pour cette vue, on récupère le DF Langdeck et on extrait la liste des thèmes (l'ensemble des valeurs dans Thème1, 2, 3)
 Ensuite, on ajoute autant de colonnes que d'éléments de la liste
 Enfin, on supprime les colonnes Theme1,2,3 et on utilise pd.melt pour transposer les colonnes de thème en valeurs. On suprrme les themes = False*
@@ -891,8 +768,144 @@ df_thema = pd.melt(df_thema, id_vars=["hash","maitre","ordre","expression","idx"
 df_thema = df_thema.loc[df_thema["is_thema"]]
 save_df_to_gsheet ("t_lex_thema", df_thema)
 
-"""# Vocabulaire EC"""
+"""# Etudes de cas
 
+## Ajout d'une EC
+"""
+
+df_ec_meta = load_df_from_gsheet ("t_ec_meta")
+# On recharge si besoin la table vue Lemme
+# Chargement table Airtable
+base_id_ec = "appi8taq2HcbmWyLo" # Base Nouvelle HV
+table_name_ec = 'Etudes de cas'
+table_name_location = 'Lieux'
+table_name_service = 'Services'
+table_name_interpret = 'Interprètes'
+table_name_language = 'Langues'
+# table Lieux
+airtable_location = Airtable(base_id_ec, table_name_location, api_key_airtable)
+vk_location = airtable_location.get_all(view='Grid view',sort=['Lieu'])
+df_vk_location = pd.DataFrame.from_records((r['fields'] for r in vk_location))
+# table Services
+airtable_service = Airtable(base_id_ec, table_name_service, api_key_airtable)
+vk_service = airtable_service.get_all(view='Grid view',sort=['Name'])
+df_vk_service = pd.DataFrame.from_records((r['fields'] for r in vk_service))
+# table Interprètes
+airtable_interpret = Airtable(base_id_ec, table_name_interpret, api_key_airtable)
+vk_interpret = airtable_interpret.get_all(view='Grid view',sort=['Interprète'])
+df_vk_interpret = pd.DataFrame.from_records((r['fields'] for r in vk_interpret))
+# table Langues
+airtable_language = Airtable(base_id_ec, table_name_language, api_key_airtable)
+vk_language = airtable_language.get_all(view='Grid view',sort=['Name'])
+df_vk_language = pd.DataFrame.from_records((r['fields'] for r in vk_language))
+
+airtable_ec = Airtable(base_id_ec, table_name_ec, api_key_airtable)
+vk_ec = airtable_ec.get_all(view='EC',sort=['uid', 'ec_date'])
+df_vk_ec = pd.DataFrame.from_records((r['fields'] for r in vk_ec))
+df_vk_ec.drop_duplicates(subset=['ec_name'], inplace=True)
+# on filtre
+df_vk_ec = df_vk_ec.loc[df_vk_ec["ec_status"]=="Réalisé"]
+
+#df_vk_ec = df_vk_ec.loc[df_vk_ec["uid"]==21]
+
+# on ajoute les colonnes pour le merge avec ec_meta
+df_vk_ec["uid"]=df_vk_ec["uid"].astype(int)
+df_vk_ec["ID"]=df_vk_ec["uid"].apply(lambda x:"EC"+ "{:02d}".format(x))
+
+# on réserve pour la suite (script CR)
+df_ec_script = df_vk_ec[["ec_name", "uid","ec_script"]]
+# on ne conserve que les ec absentes dans meta
+df_vk_ec = df_vk_ec.loc[~df_vk_ec["ID"].isin(df_ec_meta["ID"])]
+
+# on convertit les listes à 1 élément en string
+df_vk_ec["ec_service"] = df_vk_ec["ec_service"].apply(lambda x: ''.join([str(i) for i in x]))
+# on complète les infos
+df_vk_ec["Thème"] = df_vk_ec["ec_service"].apply(lambda x: airtable_service.get(x)['fields']['Name'])
+df_vk_ec["Domaine"] = df_vk_ec["ec_service"].apply(lambda x: airtable_service.get(x)['fields']['Domaine'])
+df_vk_ec["Présentation"] = df_vk_ec["ec_service"].apply(lambda x: airtable_service.get(x)['fields']['Resume'])
+# interprète
+df_vk_ec["ec_interpret"] = df_vk_ec["ec_interpret"].apply(lambda x: ''.join([str(i) for i in x]))
+df_vk_ec["Interprète"] = df_vk_ec["ec_interpret"].apply(lambda x: airtable_interpret.get(x)['fields']['Nom complet'])
+# lieu (location)
+df_vk_ec["ec_location"] = df_vk_ec["ec_location"].apply(lambda x: ''.join([str(i) for i in x]))
+df_vk_ec["Lieu"] = df_vk_ec["ec_location"].apply(lambda x: airtable_location.get(x)['fields']['Adresse'])
+# Langue
+df_vk_ec["ec_langue"] = df_vk_ec["ec_langue"].apply(lambda x: ''.join([str(i) for i in x]))
+df_vk_ec["Language"] = df_vk_ec["ec_langue"].apply(lambda x: airtable_language.get(x)['fields']['Name'])
+df_vk_ec["Language_code"] = df_vk_ec["ec_langue"].apply(lambda x: airtable_language.get(x)['fields']['Code'])
+
+# on supprime les colonnes devenues inutiles
+df_vk_ec.drop(["ec_service","ec_interpret","interpret_nom_complet","service_resume","ec_location","location_adress","ec_langue","ec_domaine","ec_script","Notes","Attachments"], axis=1, inplace=True)
+
+df_vk_ec.rename ({"ec_date":"Date","ec_status":"Statut","ec_name":"Nom","ec_doc_url":"CR","ec_contexte":"Contexte"}, axis=1, inplace=True)
+
+df_vk_ec["Cover"]=df_vk_ec["ID"].apply(lambda x: "Files_Files_/assets/images/" + x + ".png")
+df_vk_ec["Audio1"]=pd.NA
+df_vk_ec["Audio2"]=pd.NA
+df_vk_ec.drop(["uid"], axis=1, inplace=True)
+
+frames=[]
+frames.append(df_ec_meta)
+frames.append(df_vk_ec)
+df_ec_meta_update = pd.concat(frames)
+
+save_df_to_gsheet ("t_ec_meta", df_ec_meta_update)
+
+"""## Ajout des scripts new EC"""
+
+airtable_ec = Airtable(base_id_ec, table_name_ec, api_key_airtable)
+vk_ec = airtable_ec.get_all(view='EC',sort=['uid', 'ec_date'])
+df_vk_ec = pd.DataFrame.from_records((r['fields'] for r in vk_ec))
+df_vk_ec.drop_duplicates(subset=['ec_name'], inplace=True)
+# on filtre
+df_vk_ec = df_vk_ec.loc[df_vk_ec["ec_status"]=="Réalisé"]
+# on ajoute les colonnes pour le merge avec ec_meta
+df_vk_ec["uid"]=df_vk_ec["uid"].astype(int)
+df_vk_ec["ID"]=df_vk_ec["uid"].apply(lambda x:"EC"+ "{:02d}".format(x))
+# on réserve pour la suite (script CR)
+df_ec_script = df_vk_ec[["ec_name", "uid","ec_script"]]
+
+
+table_name_script = 'EC_Script'
+# table Lieux
+airtable_script = Airtable(base_id_ec, table_name_script, api_key_airtable)
+vk_script = airtable_script.get_all(view='Grid view',sort=['sequence','uid'])
+df_vk_script = pd.DataFrame.from_records((r['fields'] for r in vk_script))
+
+df_ec_meta = load_df_from_gsheet ("t_ec_meta")
+df_ec_script_content = load_df_from_gsheet ("t_ec_content_fr")
+df_ec_script_content_new = df_ec_script_content.drop(df_ec_script_content.index)
+
+df_ec_script["EC_Key"] = df_ec_script["uid"].apply(lambda x:"EC"+ "{:02d}".format(x))
+
+# on ne conserve que les ec scripts absentes dans meta ET avec du contenu
+df_ec_script = df_ec_script.loc[(~df_ec_script["EC_Key"].isin(df_ec_script_content["EC_Key"])) & (~pd.isna(df_ec_script["ec_script"]))]
+
+if len(df_ec_script) > 0:
+
+  # on explose (transpose) les ids de dialogues
+  df_ec_script = df_ec_script.explode('ec_script')
+
+  df_ec_script["PhraseFR"] = df_ec_script["ec_script"].apply(lambda x: airtable_script.get(x)['fields']['texte'])
+  df_ec_script["Locuteur"] = df_ec_script["ec_script"].apply(lambda x: airtable_script.get(x)['fields']['locuteur'])
+  df_ec_script["seq"] = df_ec_script["ec_script"].apply(lambda x: "{:02d}".format(airtable_script.get(x)['fields']['uid']))
+  df_ec_script["ID"] = df_ec_script[["EC_Key","seq"]].apply(lambda x: x[0] + "-FRA-001_" + x[1], axis=1)
+  df_ec_script["AudioFR"] = df_ec_script["ID"].apply(lambda x: "Files_Files_/assets/audio/" + x + ".mp3")
+
+  df_ec_script["Sens"] = df_ec_script["Locuteur"].apply(lambda x: "A" if x == "L’orthoptiste" else "B")
+
+  df_ec_script.drop(["uid","ec_name","ec_script","seq"], axis=1, inplace=True)
+
+  frames =[]
+  frames.append(df_ec_script_content)
+  frames.append(df_ec_script)
+  df_ec_script_update = pd.concat(frames)
+
+  save_df_to_gsheet ("t_ec_content_fr", df_ec_script_update)
+
+"""## Vocabulaire EC"""
+
+import hashlib
 #---- Chargement table Airtable EC_Content dans un DF
 vk_at_ecc = Airtable(base_id, 'EC_Content', api_key_airtable).get_all(view='CR',sort='ID1')
 df_vkat_ecc = pd.DataFrame.from_records((r['fields'] for r in vk_at_ecc))
@@ -910,14 +923,11 @@ df_vocab = load_df_from_gsheet ("t_ec_vocabulary")
 # la clé est double : EC_KeyFR + Vocabulaire - ID + vocabulary_unit
 df_vkat_ecc.drop(["Vocabulaire","ID1","ID2","EC","EC_Key","Locuteur","Phrase","PhraseFR"], axis=1, inplace=True)
 df_vkat_ecc.rename({"vocabulary_unit":"Vocabulaire","ID":"EC_KeyFR"}, axis=1, inplace=True)
+df_vkat_ecc["Vocabulaire"] = df_vkat_ecc["Vocabulaire"].map(lambda x:np.nan if x=="" else x)
+df_vkat_ecc = df_vkat_ecc.loc[~pd.isna(df_vkat_ecc["Vocabulaire"])]
 
-# df_vkat_ecc = df_vkat_ecc.loc[df_vkat_ecc["Vocabulaire"]!=""]
-
-import hashlib
 # on créé une clé unique
 df_vkat_ecc["PKID"]=df_vkat_ecc[["EC_KeyFR","Vocabulaire"]].apply(lambda x:x[0]+"-"+str(int(hashlib.sha1((x[0]+x[1]).encode("utf-8")).hexdigest(), 16) % (10 ** 8)), axis=1)
-#on vire les lignes sans vocabulaire
-df_vkat_ecc=df_vkat_ecc.loc[df_vkat_ecc["Vocabulaire"].str.len() > 0]
 # on concatène
 frames=[]
 frames.append(df_vocab)
@@ -926,53 +936,27 @@ df_vocab = pd.concat(frames)
 # on vire les doublons
 df_vocab.drop_duplicates(subset="PKID", inplace=True)
 
+# on enregiste
+save_df_to_gsheet ("t_ec_vocabulary", df_vocab)
 
-
-"""# Traductions IA pour les EDC
+"""## Traductions IA pour les EDC
 
 On charge la table t_ec_content_trad et on créé une table des propositions  comme t_corpus_nlp
 """
 
-'''
-df_ec_trad["translation_pivot_fr"]=pd.NA
-df_ec_trad["translation_pivot_en"]=pd.NA
-df_ec_trad["translation_pivot"]=pd.NA
-df_ec_trad["translation_ai_source"]=0
-df_ec_trad["translation_ai"]=pd.NA
+FILTER_LANG
 
+df_ec_trad = load_df_from_gsheet ("t_ec_content_trad")
+df_ec_meta = load_df_from_gsheet ("t_ec_meta")
+df_ec_ct_substitute = load_df_from_gsheet ("t_ec_ct_substitute")
+df_ec_nlp = load_df_from_gsheet ("t_corpus_nlp")
+# on vide le contenu, on conserve le gabarit
+df_ec_nlp.drop(df_ec_nlp.index,inplace=True) 
 
-trad2_temp = wb.worksheet("t_ec_content_trad2")
-data = trad2_temp.get_all_values()
-df_ec_trad2 = pd.DataFrame(data[1:], columns=data[0])
-'''
-
-tbl = wb.worksheet("t_ec_content_trad")
-data = tbl.get_all_values()
-df_ec_trad = pd.DataFrame(data[1:], columns=data[0])
-
-tbl = wb.worksheet("t_ec_content_fr")
-data = tbl.get_all_values()
-df_ec_fr = pd.DataFrame(data[1:], columns=data[0])
+df_ec_fr = load_df_from_gsheet ("t_ec_content_fr")
 df_ec_fr["translation_pivot_fr"]=df_ec_fr["PhraseFR"]
 df_ec_fr["translation_pivot_en"]=pd.NA
 df_ec_fr["translation_pivot"]=df_ec_fr[["translation_pivot_fr","translation_pivot_en"]].apply(lambda x:x[0] if FILTER_PIVOT=="fr" else x[1] , axis=1)
-
-tbl = wb.worksheet("t_ec_meta")
-data = tbl.get_all_values()
-df_ec_meta = pd.DataFrame(data[1:], columns=data[0])
-
-tbl = wb.worksheet("t_ec_ct_substitute")
-data = tbl.get_all_values()
-df_ec_ct_substitute = pd.DataFrame(data[1:], columns=data[0])
-
-"""### Ajout d'une langue si besoin"""
-
-FILTER_PIVOT = "fr"
-FILTER_LANG="alb"
-#FILTER_EC = "EC01"
-# on créé une table des propositions comme t_corpus_nlp
-df_ec_nlp = df_langdeck_ai.copy()
-df_ec_nlp.drop(df_ec_nlp.index,inplace=True) 
 # clé EDC+TRAD
 df_ec_fr["id_trad"]=df_ec_fr["ID"].apply(lambda x:x[:5] + FILTER_LANG.upper() + "-" + x[9:])
 # nombre de trad IA disponibles pour chaque clé
@@ -981,11 +965,9 @@ df_ec_fr["PhraseTR"]=pd.NA
 df_ec_fr["AudioTR"]=pd.NA
 df_ec_fr["AudioTR_AI"]=pd.NA
 df_ec_fr.rename(columns={"ID":"EC_KeyFR","id_trad":"ID"}, inplace=True)
-'''
-df_ec_fr = pd.merge(df_ec_fr, df_ec_trad2[["ID","translation_ai"]], how="left", left_on="id_trad", right_on="ID")
-df_ec_fr.drop('ID_y', axis=1, inplace=True)
-df_ec_fr.rename(columns={"ID_x":"EC_KeyFR","id_trad":"ID"}, inplace=True)
-'''
+
+FILTER_PIVOT = "fr"
+FILTER_LANG = "alb"
 
 """#### On a dans A toutes les EC en Fr et dans B les traductions existantes en RUS
 On complète les traductions manquantes par appel IA
@@ -1001,6 +983,29 @@ frames.append(df_ec_trad)
 frames.append(df_newlines)
 frames.append(df_kolines)
 df_ec_trad = pd.concat(frames)
+
+df_ec_fr.tail()
+
+df_ec_fr.iloc[1]
+
+df_ec_trad.iloc[0]
+
+vk_filter = list(map(lambda d: d["trigramme"], vk_languages))
+
+# concaténation des dataframes
+frames =[]
+frames.append(df_corpus_nlp)
+vk_languages = get_list_languages() 
+
+for FILTER_LANG in vk_filter:
+  for dic in vk_languages:
+    language = dic["trigramme"]
+    iso_code = dic["iso-code"]
+    # Si la langue est celle du filtre ?
+    if language == FILTER_LANG:
+      # Pour chaque code vendor qui gère la langue 
+      for vc in dic["vendor-code"]:
+        # appel de la traduction si absente
 
 '''
 df_ec_trad.drop('translation_ai', axis=1, inplace=True)
@@ -1262,176 +1267,7 @@ for langue in vk_filter:
         False) 
         if is_audio(x[2])==False else False, axis=1)
 
-"""# Ajout d'une EC depuis Airtable"""
 
-tbl = wb.worksheet("t_ec_meta")
-data = tbl.get_all_values()
-df_ec_meta = pd.DataFrame(data[1:], columns=data[0])
-
-# On recharge si besoin la table vue Lemme
-# Chargement table Airtable
-base_id_ec = "appi8taq2HcbmWyLo" # Base Nouvelle HV
-table_name_ec = 'Etudes de cas'
-table_name_location = 'Lieux'
-table_name_service = 'Services'
-table_name_interpret = 'Interprètes'
-table_name_language = 'Langues'
-# table Lieux
-airtable_location = Airtable(base_id_ec, table_name_location, api_key_airtable)
-vk_location = airtable_location.get_all(view='Grid view',sort=['Lieu'])
-df_vk_location = pd.DataFrame.from_records((r['fields'] for r in vk_location))
-# table Services
-airtable_service = Airtable(base_id_ec, table_name_service, api_key_airtable)
-vk_service = airtable_service.get_all(view='Grid view',sort=['Name'])
-df_vk_service = pd.DataFrame.from_records((r['fields'] for r in vk_service))
-# table Interprètes
-airtable_interpret = Airtable(base_id_ec, table_name_interpret, api_key_airtable)
-vk_interpret = airtable_interpret.get_all(view='Grid view',sort=['Interprète'])
-df_vk_interpret = pd.DataFrame.from_records((r['fields'] for r in vk_interpret))
-# table Langues
-airtable_language = Airtable(base_id_ec, table_name_language, api_key_airtable)
-vk_language = airtable_language.get_all(view='Grid view',sort=['Name'])
-df_vk_language = pd.DataFrame.from_records((r['fields'] for r in vk_language))
-
-airtable_ec = Airtable(base_id_ec, table_name_ec, api_key_airtable)
-vk_ec = airtable_ec.get_all(view='EC',sort=['uid', 'ec_date'])
-df_vk_ec = pd.DataFrame.from_records((r['fields'] for r in vk_ec))
-df_vk_ec.drop_duplicates(subset=['ec_name'], inplace=True)
-# on filtre
-df_vk_ec = df_vk_ec.loc[df_vk_ec["ec_status"]=="Réalisé"]
-
-#df_vk_ec = df_vk_ec.loc[df_vk_ec["uid"]==21]
-
-# on ajoute les colonnes pour le merge avec ec_meta
-df_vk_ec["uid"]=df_vk_ec["uid"].astype(int)
-df_vk_ec["ID"]=df_vk_ec["uid"].apply(lambda x:"EC"+ "{:02d}".format(x))
-
-# on réserve pour la suite (script CR)
-df_ec_script = df_vk_ec[["ec_name", "uid","ec_script"]]
-
-# on ne conserve que les ec absentes dans meta
-df_vk_ec = df_vk_ec.loc[~df_vk_ec["ID"].isin(df_ec_meta["ID"])]
-
-df_vk_ec
-
-# on convertit les listes à 1 élément en string
-df_vk_ec["ec_service"] = df_vk_ec["ec_service"].apply(lambda x: ''.join([str(i) for i in x]))
-# on complète les infos
-df_vk_ec["Thème"] = df_vk_ec["ec_service"].apply(lambda x: airtable_service.get(x)['fields']['Name'])
-df_vk_ec["Domaine"] = df_vk_ec["ec_service"].apply(lambda x: airtable_service.get(x)['fields']['Domaine'])
-df_vk_ec["Présentation"] = df_vk_ec["ec_service"].apply(lambda x: airtable_service.get(x)['fields']['Resume'])
-# interprète
-df_vk_ec["ec_interpret"] = df_vk_ec["ec_interpret"].apply(lambda x: ''.join([str(i) for i in x]))
-df_vk_ec["Interprète"] = df_vk_ec["ec_interpret"].apply(lambda x: airtable_interpret.get(x)['fields']['Nom complet'])
-# lieu (location)
-df_vk_ec["ec_location"] = df_vk_ec["ec_location"].apply(lambda x: ''.join([str(i) for i in x]))
-df_vk_ec["Lieu"] = df_vk_ec["ec_location"].apply(lambda x: airtable_location.get(x)['fields']['Adresse'])
-# Langue
-df_vk_ec["ec_langue"] = df_vk_ec["ec_langue"].apply(lambda x: ''.join([str(i) for i in x]))
-df_vk_ec["Language"] = df_vk_ec["ec_langue"].apply(lambda x: airtable_language.get(x)['fields']['Name'])
-df_vk_ec["Language_code"] = df_vk_ec["ec_langue"].apply(lambda x: airtable_language.get(x)['fields']['Code'])
-
-# on supprime les colonnes devenues inutiles
-df_vk_ec.drop(["ec_service","ec_interpret","interpret_nom_complet","service_resume","ec_location","location_adress","ec_langue","ec_domaine","ec_script","Notes","Attachments"], axis=1, inplace=True)
-
-df_vk_ec.rename ({"ec_date":"Date","ec_status":"Statut","ec_name":"Nom","ec_doc_url":"CR","ec_contexte":"Contexte"}, axis=1, inplace=True)
-
-df_vk_ec["Cover"]=df_vk_ec["ID"].apply(lambda x: "Files_Files_/assets/images/" + x + ".png")
-df_vk_ec["Audio1"]=pd.NA
-df_vk_ec["Audio2"]=pd.NA
-df_vk_ec.drop(["uid"], axis=1, inplace=True)
-
-frames=[]
-frames.append(df_ec_meta)
-frames.append(df_vk_ec)
-df_ec_meta_update = pd.concat(frames)
-
-df_vk_ec
-
-# on enregistre dans GSheet
-try:
-  t_corpus = wb.worksheet("t_ec_meta")
-  wb.del_worksheet(t_corpus)
-except:
-  print ("Onglet inexistant !")
-  pass
-wb.add_worksheet("t_ec_meta", 1, 1)
-export_sheet = wb.worksheet("t_ec_meta")
-set_with_dataframe(export_sheet, df_ec_meta_update)
-
-"""## EC : scripts"""
-
-table_name_script = 'EC_Script'
-# table Lieux
-airtable_script = Airtable(base_id_ec, table_name_script, api_key_airtable)
-vk_script = airtable_script.get_all(view='Grid view',sort=['sequence','uid'])
-df_vk_script = pd.DataFrame.from_records((r['fields'] for r in vk_script))
-
-tbl = wb.worksheet("t_ec_meta")
-data = tbl.get_all_values()
-df_ec_meta = pd.DataFrame(data[1:], columns=data[0])
-
-tbl = wb.worksheet("t_ec_content_fr")
-data = tbl.get_all_values()
-df_ec_script_content = pd.DataFrame(data[1:], columns=data[0])
-df_ec_script_content_new = df_ec_script_content.drop(df_ec_script_content.index)
-
-df_ec_script["EC_Key"] = df_ec_script["uid"].apply(lambda x:"EC"+ "{:02d}".format(x))
-
-# on ne conserve que les ec scripts absentes dans meta ET avec du contenu
-
-df_vk_script
-
-table_name_script = 'EC_Script'
-# table Lieux
-airtable_script = Airtable(base_id_ec, table_name_script, api_key_airtable)
-vk_script = airtable_script.get_all(view='Grid view',sort=['sequence','uid'])
-df_vk_script = pd.DataFrame.from_records((r['fields'] for r in vk_script))
-
-tbl = wb.worksheet("t_ec_meta")
-data = tbl.get_all_values()
-df_ec_meta = pd.DataFrame(data[1:], columns=data[0])
-
-tbl = wb.worksheet("t_ec_content_fr")
-data = tbl.get_all_values()
-df_ec_script_content = pd.DataFrame(data[1:], columns=data[0])
-df_ec_script_content_new = df_ec_script_content.drop(df_ec_script_content.index)
-
-df_ec_script["EC_Key"] = df_ec_script["uid"].apply(lambda x:"EC"+ "{:02d}".format(x))
-
-# on ne conserve que les ec scripts absentes dans meta ET avec du contenu
-df_ec_script = df_ec_script.loc[(~df_ec_script["EC_Key"].isin(df_ec_script_content["EC_Key"])) & (~pd.isna(df_ec_script["ec_script"]))]
-
-if len(df_ec_script) > 0:
-
-  # on explose (transpose) les ids de dialogues
-  df_ec_script = df_ec_script.explode('ec_script')
-
-  df_ec_script["PhraseFR"] = df_ec_script["ec_script"].apply(lambda x: airtable_script.get(x)['fields']['texte'])
-  df_ec_script["Locuteur"] = df_ec_script["ec_script"].apply(lambda x: airtable_script.get(x)['fields']['locuteur'])
-  df_ec_script["seq"] = df_ec_script["ec_script"].apply(lambda x: "{:02d}".format(airtable_script.get(x)['fields']['uid']))
-  df_ec_script["ID"] = df_ec_script[["EC_Key","seq"]].apply(lambda x: x[0] + "-FRA-001_" + x[1], axis=1)
-  df_ec_script["AudioFR"] = df_ec_script["ID"].apply(lambda x: "Files_Files_/assets/audio/" + x + ".mp3")
-
-  df_ec_script["Sens"] = df_ec_script["Locuteur"].apply(lambda x: "A" if x == "L’orthoptiste" else "B")
-
-  df_ec_script.drop(["uid","ec_name","ec_script","seq"], axis=1, inplace=True)
-
-  frames =[]
-  frames.append(df_ec_script_content)
-  frames.append(df_ec_script)
-  df_ec_script_update = pd.concat(frames)
-  
-  # on enregistre dans GSheet
-  try:
-    t_corpus = wb.worksheet("t_ec_content_fr")
-    wb.del_worksheet(t_corpus)
-  except:
-    print ("Onglet inexistant !")
-    pass
-  wb.add_worksheet("t_ec_content_fr", 1, 1)
-  export_sheet = wb.worksheet("t_ec_content_fr")
-  set_with_dataframe(export_sheet, df_ec_script_update)
 
 """# T_EC_TRAD SUBSTITUTES
 
