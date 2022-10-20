@@ -14,6 +14,7 @@ Original file is located at
 # -*- coding: utf8 -*-
 import pandas as pd
 pd.set_option("display.width",1000)
+pd.options.mode.chained_assignment = None  # default='warn'
 
 import numpy as np
 import requests
@@ -118,10 +119,20 @@ def load_df_from_gsheet (table_name):
 # usage : df = load_df_from_gsheet (table_name):
 
 def get_airt_corpus():
+  """ 
+  ------------------------------------------
+  Récupère un Dataframe du Corpus (référentiel) Airtable
+  Parameters : aucun
+
+  Returns : aucun
+ 
+  usage : get_airt_corpus():
+  ------------------------------------------
+  """ 
   vk_at = airtable.get_all(view='Admin',sort='vocabulary_unit')
   df_vkat = pd.DataFrame.from_records((r['fields'] for r in vk_at))
   # on ne garde que les colonnes utiles
-  df_vkat = df_vkat[["uid","lemma","rank","vocabulary_unit","headword","pivot","pivot_en","alphabet","theme","timestamp"]]
+  df_vkat = df_vkat[["uid","lemma","rank","vocabulary_unit","headword","pivot","pivot_en","alphabet","theme","timestamp","pending"]]
   # on ajoute les colonnes de langues (absentes dans Airtable, gérées dans GSheet)
   for language in vk_languages:
     df_vkat[language["trigramme"]] = np.nan
@@ -149,14 +160,25 @@ def get_translation_fr_en (input):
   from deep_translator import GoogleTranslator
   return GoogleTranslator(source="fr", target="en").translate(input)
 
-def airtable_check_pivot_translation(input):
+def set_airt_pivot_fr(input):
+  record = airtable.search('vocabulary_unit', input)
+  aDict = {}
+  # on met à jour la table dans Airtable
+  for i in record:
+    aDict["pivot"] = i["fields"]["vocabulary_unit"]
+    print (aDict["pivot"])
+    airtable.update(i["id"], aDict)   
+  return aDict["pivot"]
+
+def set_airt_pivot_en(input):
   record = airtable.search('vocabulary_unit', input)
   aDict = {}
   aDict["pivot_en"] = get_translation_fr_en(input)
   print (aDict["pivot_en"])
   # on met à jour la table dans Airtable
-  airtable.update(record[0]["id"], aDict)   
-
+  for i in record:
+    airtable.update(i["id"], aDict)   
+  return aDict["pivot_en"]
   
 def create_uid (vk_uid, record):
   """ 
@@ -235,6 +257,55 @@ def update_lgdk_corpus(hash):
   except Exception as e:        
     pass  
   return pd.Series([r1, r2, r3, r4, r5, r6, r7, r8, r9])
+
+
+def check_stats():
+  ct_corpus = len(df_lgdk_corpus)
+  # df_lgdk_corpus.loc[pd.isna(df_lgdk_corpus["translation_pivot"])]
+  ct_pivot_missing = len(df_lgdk_corpus.loc[df_lgdk_corpus["translation_pivot"]==""])
+  ct_pivot_fr_missing = len(df_lgdk_corpus.loc[df_lgdk_corpus["translation_pivot_fr"]==""])
+  ct_pivot_en_missing = len(df_lgdk_corpus.loc[df_lgdk_corpus["translation_pivot_en"]==""])
+  ct_pivot_uid_missing = len(df_lgdk_corpus.loc[df_lgdk_corpus["hash"]==""])
+  s = f"Pivot(s) manquant(s) : {ct_pivot_missing}\nPivot(s) manquant(s) (FR) : {ct_pivot_fr_missing}\n"
+  s += f"Pivot(s) manquant(s) (EN) : {ct_pivot_en_missing}\nUIds(s) manquant(s) : {ct_pivot_uid_missing}\n"
+  print (s)
+  return
+
+def get_google_translation (expression_pivot, lang_trigramme, lang_filter, iso_code, ai_code, langue_pivot):
+  from deep_translator import GoogleTranslator
+  translation = expression_pivot
+  state = 0 #par défaut
+  if lang_trigramme == lang_filter:
+    try:
+      translation = GoogleTranslator(source=langue_pivot, target=iso_code).translate(expression_pivot)
+      if translation != "":
+        print (expression_pivot + "("+ langue_pivot +") "+ " : " + translation)
+        state = 0 #found
+    except Exception as e:
+      print (e)
+      translation = ""
+      pass
+  else:
+    ai_code = 0
+  return translation, state, ai_code
+
+def get_deepl_translation (expression_pivot, lang_trigramme, lang_filter, iso_code, ai_code, langue_pivot):
+  from deep_translator import DeeplTranslator
+  translation = expression_pivot
+  state = 0 #par défaut
+  if lang_trigramme == lang_filter:
+    try:
+      translation = DeeplTranslator(api_key="ea9751e0-a036-d65e-14af-3169e96b11e4:fx", source=langue_pivot, target=iso_code, use_free_api=True).translate(expression_pivot)
+      if translation != "":
+        print (expression_pivot + "("+ langue_pivot +") "+ " : " + translation)
+        state = 0 #found
+    except Exception as e:
+      print (e)
+      translation = ""
+      pass
+  else:
+    ai_code = 0
+  return translation, state, ai_code
 
 # Comparaison des versions de référentiels
 def getLastModifiedTime (wb):
@@ -379,6 +450,8 @@ def get_larousse (text):
     s = "à renseigner"
   return s
 
+"""# Corpus"""
+
 #---- Base GSheet
 api_key_gmail = "keysgpJWq3aWwqSZe"
 db_langdeck_url = "https://docs.google.com/spreadsheets/d/1iJLt3qAKq576eNirMwcsdRltg7nerwa9N70dA0vraa8/" #db-langdeck
@@ -389,30 +462,28 @@ wb  = gc.open_by_url(sheet)
 vk_languages = get_list_languages()
 
 #---- Base Airtable
-api_key_airtable = "******" 
+api_key_airtable = "keyrI98TIqu6mbFcf" 
 headers = {"Authorization": "Bearer " + api_key_airtable,"Content-Type" : "application/json"}
-base_id = "******" # Base Nouvelle HV
+base_id = "appawT3gg7cJhPYv0" # Base Nouvelle HV
 table_name = 'Corpus'
 airtable = Airtable(base_id, table_name, api_key_airtable)
 
 # Chargement table corpus en Dataframe
 df_vkat = get_airt_corpus()
-#================================================== 
 #---- maj des uid manquants
-#==================================================
 check_missing_uids()
 # on recharge avec les uids renseignés 
 df_airt_corpus = get_airt_corpus()
-#================================================== 
 #---- traduction fr->en manquantes (pivot)
-#==================================================
-df_airt_corpus["pivot_en"]=df_airt_corpus[["vocabulary_unit","pivot_en"]].apply(lambda x:airtable_check_pivot_translation(x[0]) if pd.isna(x[1]) else x[1], axis=1)
+df_airt_corpus["pivot_en"]=df_airt_corpus[["vocabulary_unit","pivot_en"]].apply(lambda x:set_airt_pivot_en(x[0]) if pd.isna(x[1]) else x[1], axis=1)
+#---- pivot (fr) manquant
+df_airt_corpus["pivot"]=df_airt_corpus[["vocabulary_unit","pivot"]].apply(lambda x:set_airt_pivot_fr(x[0]) if pd.isna(x[1]) else x[1], axis=1)
 
 #======================================================= 
 #---- Transposition des colonnes de langues en lignes
 #=======================================================
 df_airt_corpus = pd.melt(df_airt_corpus,
-                         id_vars=["uid", "lemma","rank","vocabulary_unit","headword","pivot","pivot_en","alphabet","timestamp","theme"],
+                         id_vars=["uid", "lemma","rank","vocabulary_unit","headword","pivot","pivot_en","alphabet","timestamp","theme","pending"],
                          var_name="language",
                          value_name="translation")
 
@@ -438,7 +509,7 @@ df_airt_corpus.rename(columns={"pivot":"translation_pivot_fr",
 #---- on charge la base corpus de langdeck (Gsheet)
 df_lgdk_corpus = get_lgdk_corpus()
 df_lgdk_corpus.drop (["translation_pivot_fr","translation_pivot_en"], axis=1, inplace=True)
-df_lgdk_corpus = pd.merge(df_lgdk_corpus, df_airt_corpus[["hash","translation_pivot_fr","translation_pivot_en"]], on="hash")
+df_lgdk_corpus = pd.merge(df_lgdk_corpus, df_airt_corpus[["hash","translation_pivot_fr","translation_pivot_en","headword","pending","theme"]], on="hash")
 # suppression des enregistrements dans GSheet et supprimés dans AT
 df_lgdk_corpus.drop (
     df_lgdk_corpus[~df_lgdk_corpus["uid"].isin(df_airt_corpus["uid"])].index,
@@ -478,35 +549,52 @@ for index, row in df_new_entries.iterrows():
   # ajout dans le DF
   df_lgdk_corpus = df_lgdk_corpus.append(d, ignore_index = True)
 
-# mise à jour dans GSheet des données de référentiel
-df_lgdk_corpus[["theme_1","theme_2","theme_3","maitre","ordre","expression","idx","translation_pivot_fr","translation_pivot_en"]] = df_lgdk_corpus["hash"].apply(lambda x:update_lgdk_corpus(x))
+
+# mise à jour dans GSheet des données de référentiel (nouvelle méthode + rapide)
+# df_lgdk_corpus[["theme_1","theme_2","theme_3","maitre","ordre","expression","idx","translation_pivot_fr","translation_pivot_en"]] = df_lgdk_corpus["hash"].apply(lambda x:update_lgdk_corpus(x))
+df_lgdk_corpus.drop(["theme_1","theme_2","theme_3","maitre","ordre","expression","idx","translation_pivot_fr","translation_pivot_en"], axis=1, inplace=True)
+df_lgdk_corpus = pd.merge(df_lgdk_corpus, df_airt_corpus[["hash","theme_1","theme_2","theme_3","maitre","ordre","expression","idx","translation_pivot_fr","translation_pivot_en"]], on="hash", how="left")
 df_lgdk_corpus.drop(["headword","theme"], axis=1, inplace=True)
+df_lgdk_corpus["translation_pivot"]=df_lgdk_corpus["translation_pivot_en"]
+
+df_lgdk_corpus_2 = df_lgdk_corpus.copy()
+df_lgdk_corpus.drop(["pending"], axis=1, inplace=True)
+# Save to GSheet
 save_df_to_gsheet ("t_corpus_all_entries", df_lgdk_corpus)
 
-"""# Table Corpus Headword (Lemme)
+"""# Corpus Lemme
 Indexé sur le Lemme
 """
 
-# table vue Lemme
-at_lemme = Airtable(base_id, "Corpus", api_key_airtable)
-vk_lemme = at_lemme.get_all(view='Lemme',sort=['alphabet', 'rank','vocabulary_unit'])
-df_vklemme = pd.DataFrame.from_records((r['fields'] for r in vk_lemme))
-df_vklemme.drop_duplicates(subset=['vocabulary_unit'], inplace=True)
+def get_airt_lemma():
+  """ 
+  ------------------------------------------
+  Récupère un Dataframe du Corpus (vue Lemme) Airtable
+  Parameters : aucun
+
+  Returns : aucun
+ 
+  usage : get_airt_lemma():
+  ------------------------------------------
+  """ 
+  vk = airtable.get_all(view='Lemme',sort=['alphabet', 'rank','vocabulary_unit'])
+  df_vk = pd.DataFrame.from_records((r['fields'] for r in vk))
+  df_vk.drop_duplicates(subset=['vocabulary_unit'], inplace=True)
+  return df_vk
+
+# table Corpus Airtable vue Lemme
+df_airt_lemma = get_airt_lemma()
 ### on charge la table t_corpus_head
-sheet = db_langdeck_url
-wb  = gc.open_by_url(sheet)
-tbl = wb.worksheet("t_corpus_head")
-# on recharge avec les nouvelles données
-data = tbl.get_all_values()
-df_corpus_head = pd.DataFrame(data[1:], columns=data[0]).drop_duplicates(subset=['terme_pref']) 
-# différence dans les deux sens
-# df_diff = df_langdeck[~df_langdeck["maitre"].isin(df_corpus_head["terme_pref"])].drop_duplicates(subset=['maitre'])
-# on vire ce qui n'est plus dans le ref aiertabel
-df_corpus_head.drop(df_corpus_head[~df_corpus_head["terme_pref"].isin(df_langdeck["maitre"])].index, inplace=True) 
-df_head_lines = df_vklemme[(df_vklemme["vocabulary_unit"].isin(df_corpus_head["terme_pref"])) & (df_vklemme["headword"]==True)]
+df_corpus_head = load_df_from_gsheet ("t_corpus_head")
+df_corpus_head.drop_duplicates(subset=['terme_pref'], inplace=True) 
+# Double DIFF
+# on vire ce qui n'est plus dans Airtable
+df_corpus_head.drop(df_corpus_head[~df_corpus_head["terme_pref"].isin(df_lgdk_corpus["maitre"])].index, inplace=True) 
+# on vire ce qui n'est plus dans GSheet
+df_head_lines = df_airt_lemma[(df_airt_lemma["vocabulary_unit"].isin(df_corpus_head["terme_pref"])) & (df_airt_lemma["headword"]==True)]
 
 def f_content_head(lemma):
-  df_f = df_vklemme.loc[df_vklemme["lemma"]==lemma].sort_values(by=['rank'])
+  df_f = df_airt_lemma.loc[df_airt_lemma["lemma"]==lemma].sort_values(by=['rank'])
   definition = df_corpus_head.loc[df_corpus_head["terme_pref"]==lemma]["definition"].drop_duplicates().values.item()
   if len(definition) == 0:
     print("Appel Larousse " + lemma)
@@ -537,10 +625,10 @@ def f_update_head(lemma):
 
   return pd.Series([r1, r2, r3])
 
-"""### Append : Ajout des nouvelles lignes Head"""
+"""## Append : Ajout des nouvelles lignes Headword (Lemme)"""
 
 # DF des enregistrements dans AT et pas dans GS
-df_head_newlines = df_vklemme[(~df_vklemme["vocabulary_unit"].isin(df_corpus_head["terme_pref"])) & (df_vklemme["headword"]==True)]
+df_head_newlines = df_airt_lemma[(~df_airt_lemma["vocabulary_unit"].isin(df_corpus_head["terme_pref"])) & (df_airt_lemma["headword"]==True)]
 # on ajoute chaque enregistrement en passant par un DICT (pour mieux contrôler)
 for index, row in df_head_newlines.iterrows():
   d = {}
@@ -561,14 +649,7 @@ for index, row in df_head_newlines.iterrows():
   df_corpus_head = df_corpus_head.append(d, ignore_index = True)
 
 # apprès ajout, il faut recharger ce DF
-df_head_lines = df_vklemme[(df_vklemme["vocabulary_unit"].isin(df_corpus_head["terme_pref"])) & (df_vklemme["headword"]==True)]
-
-"""#### Appel Larousse si non renseigné
-https://github.com/quentin-dev/larousse_api
-
-https://pypi.org/project/PyDictionary/
-
-"""
+df_head_lines = df_airt_lemma[(df_airt_lemma["vocabulary_unit"].isin(df_corpus_head["terme_pref"])) & (df_airt_lemma["headword"]==True)]
 
 df_corpus_head["definition"] = df_corpus_head[["terme_pref","definition"]].apply(lambda x:get_larousse(x[0]) if x[1]=="" else x[1], axis=1)
 # #### Mide à jour des lignes existantes Head
@@ -576,80 +657,16 @@ df_corpus_head[["uid","translation_pivot_en","content"]] = df_corpus_head["terme
 # on sauve dans GSheet
 save_df_to_gsheet ("t_corpus_head", df_corpus_head)
 
-"""## Vocabulaire
-
-### On recherche les unités de vocabulaire et les headwords dans AT, et si non trouvés, on les créé
-On cherche dans le DF Langdeck car s'ils s'y trouvent, ils sont aussi dans AT
-Si pas trouvé on crée dans AT (ils seront créés dans Langdeck ultérieurement (processus))
-"""
-
-def f_get_vocab_unit (s):
-  s = lemmatizer.lemmatize(s).lower()
-  vu = ""
-  try:
-    vu = df_langdeck.loc[df_langdeck["expression"].str.lower()==s]["expression"].drop_duplicates().values.item()
-    print("Found " + vu + " for " + s)
-  except Exception as e:
-    vu = vu.capitalize()
-    print ("Unité de vocabulaire / Headword / Lemme introuvable : " + s)
-    # création dans le ref
-    pass
-  return vu
-
-def f_get_headword (s):
-  s = lemmatizer.lemmatize(s).lower()
-  hw = ""
-  try:
-    hw = df_langdeck.loc[df_langdeck["expression"].str.lower()==s]["maitre"].drop_duplicates().values.item()
-    print("Found " + hw + " for " + s)
-  except Exception as e:
-    hw = hw.capitalize()
-    print ("Unité de vocabulaire / Headword / Lemme introuvable : " + s.capitalize())
-    # création dans le ref
-    pass
-  return hw
-
-"""# VOCABULAIRE (NEW)"""
-
-#---- Chargement table Airtable EC_Content dans un DF
-vk_at_ecc = Airtable(base_id, 'EC_Content', api_key_airtable).get_all(view='CR',sort='ID1')
-df_vkat_ecc = pd.DataFrame.from_records((r['fields'] for r in vk_at_ecc))
-# on transpose les listes de mots
-df_vkat_ecc=df_vkat_ecc.explode("Vocabulaire")
-# on récupère les valeurs à partir du ID record
-df_vkat_ecc["vocabulary_unit"] = df_vkat_ecc["Vocabulaire"].map(lambda x:airtable.get(x)["fields"]["vocabulary_unit"] if not pd.isna(x) else "")
-df_vkat_ecc["headword"] = df_vkat_ecc["Vocabulaire"].map(lambda x:airtable.get(x)["fields"]["lemma"] if not pd.isna(x) else "")
-# chargement de la table des contenus EC (FR)
-df_ec_content_fr = load_df_from_gsheet("t_ec_content_fr")
-# onb récupère les données avec la clé (phraseFR)
-df_vkat_ecc=pd.merge(df_vkat_ecc, df_ec_content_fr [["PhraseFR","ID","EC_Key"]], left_on="Phrase", right_on="PhraseFR", how="left")
-
-# on ajoute les new records dans ec_vocabulary
-tbl = wb.worksheet("t_ec_vocabulary")
-data = tbl.get_all_values()
-df_vocab = pd.DataFrame(data[1:], columns=data[0])
-# la clé est double : EC_KeyFR + Vocabulaire - ID + vocabulary_unit
-df_vkat_ecc.drop(["Vocabulaire","ID1","ID2","EC","EC_Key","Locuteur","Phrase","PhraseFR"], axis=1, inplace=True)
-df_vkat_ecc.rename({"vocabulary_unit":"Vocabulaire","ID":"EC_KeyFR"}, axis=1, inplace=True)
-import hashlib
-# on créé une clé unique
-df_vkat_ecc["PKID"]=df_vkat_ecc[["EC_KeyFR","Vocabulaire"]].apply(lambda x:x[0]+"-"+str(int(hashlib.sha1((x[0]+x[1]).encode("utf-8")).hexdigest(), 16) % (10 ** 8)), axis=1)
-#on vire les lignes sans vocabulaire
-df_vkat_ecc=df_vkat_ecc.loc[df_vkat_ecc["Vocabulaire"].str.len() > 0]
-# on concatène
-frames=[]
-frames.append(df_vocab)
-frames.append(df_vkat_ecc)
-df_vocab = pd.concat(frames)
-# on vire les doublons
-df_vocab.drop_duplicates(subset="PKID", inplace=True)
-
-# on met à jour tous les EC publiées dans les autres langues
-
 # on enregiste
 save_df_to_gsheet ("t_ec_vocabulary", df_vocab)
 
-"""# Traductions Google"""
+
+
+
+
+
+
+"""# Corpus : Traductions Google
 
 dict_vendor =[
     {"vendor-code":"11", "vendor-abbv":"neuml","vendor-name":"txtai(Neuml)","pivot":"en", "f":"fetch_deep_tlr_txtai"},
@@ -658,8 +675,6 @@ dict_vendor =[
     {"vendor-code":"14", "vendor-abbv":"deepl","vendor-name":"DeepL","pivot":"en", "f":"fetch_deep_tlr_deepl"}
 ]  
 df_lang_vendor = pd.DataFrame(vk_languages)
-
-df_lang_vendor
 
 def translation_google (input, language, language_filter, iso_code, ai_code,langue_pivot):
   from deep_translator import GoogleTranslator
@@ -725,7 +740,7 @@ def call_nlp_deepl (language, iso_code, vc, langue_pivot, df_langdeck_ai_temp):
 
 def call_nlp_language_vendor (language, iso_code, vc, langue_pivot):
   # dataframe temporaire pour chaque appel IA
-  df_langdeck_ai_temp = df_langdeck.copy()
+  df_langdeck_ai_temp = df_lgdk_corpus.copy()
   df_langdeck_ai_temp["translation_pivot"]=df_langdeck_ai_temp[["translation_pivot_fr","translation_pivot_en"]].apply(lambda x:x[0] if langue_pivot=="fr" else x[1] , axis=1)  
   # ajout d'un uid par concaténation des 3 clés
   df_langdeck_ai_temp["uid"] = df_langdeck_ai_temp["hash"].map(str) + vc 
@@ -736,7 +751,7 @@ def call_nlp_language_vendor (language, iso_code, vc, langue_pivot):
 
   lists=[]
   # on ajoute les entrées qui sont forcées dans Airtable (pending==True)
-  df_vkat = airtable_fetch_all_records()
+  df_vkat = df_airt_corpus.copy()
   df_append=df_vkat.loc[df_vkat["pending"]==True]
   df_force_new_trad = df_langdeck_ai_temp.loc[(df_langdeck_ai_temp["uid"].isin(df_append["uid"])) & (df_langdeck_ai_temp["language"]==language)]
   lists.append(df_force_new_trad)
@@ -757,24 +772,19 @@ def call_nlp_language_vendor (language, iso_code, vc, langue_pivot):
         df_deepl = call_nlp_deepl (language, iso_code, vc, langue_pivot, df_langdeck_ai_temp)
         df_return = df_deepl
   return df_return
-
-"""1. On charge la base des traductions
-
-### Appel de l'IA Google (12)
 """
-
-# normalement, plus besoin... df_langdeck.loc[pd.isna(df_langdeck["translation_pivot_en"])]
-#df_langdeck["translation_pivot_en"]=df_langdeck[["expression","translation_pivot_en"]].apply(lambda x:get_translation_fr_en(x[0]) if pd.isna(x[1]) else x[1], axis=1)
 
 df_corpus_nlp = load_df_from_gsheet ("t_corpus_nlp")
 df_corpus_nlp = df_corpus_nlp[["uid","hash","maitre","expression","language","translation","translation_pivot","tr_pivot_lang","translation_state","translation_ai_source","translation_ai"]]	
-df_langdeck_ai_temp = df_langdeck.copy()
+df_langdeck_ai_temp = df_lgdk_corpus_2.copy()
 FILTER_PIVOT = "en"
 df_langdeck_ai_temp["translation_pivot"]=df_langdeck_ai_temp[["translation_pivot_fr","translation_pivot_en"]].apply(lambda x:x[0] if FILTER_PIVOT=="fr" else x[1] , axis=1)
 
 # on fait une passe par langue et par langue pivot
 # liste complète : 
 vk_filter = list(map(lambda d: d["trigramme"], vk_languages))
+
+
 
 # concaténation des dataframes
 frames =[]
@@ -790,40 +800,87 @@ for FILTER_LANG in vk_filter:
     if language == FILTER_LANG:
       # Pour chaque code vendor qui gère la langue 
       for vc in dic["vendor-code"]:
-        df_return = call_nlp_language_vendor (FILTER_LANG, iso_code, vc, FILTER_PIVOT)
-        frames.append(df_return)
+        print ("Appel call_nlp_language_vendor " + FILTER_LANG + " " + vc)
+        df_langdeck_ai_temp = df_lgdk_corpus_2.copy()
+        df_langdeck_ai_temp["pkid"] = df_langdeck_ai_temp["hash"].map(str) + vc
+        df_langdeck_ai_temp["translation_pivot"]=df_langdeck_ai_temp[["translation_pivot_fr","translation_pivot_en"]].apply(lambda x:x[0] if FILTER_PIVOT=="fr" else x[1] , axis=1)  
+        df_langdeck_ai_temp = df_langdeck_ai_temp [["pkid","hash","maitre","expression","pending","language","translation","translation_pivot","translation_state","translation_ai_source"]]
+        df_langdeck_ai_temp["translation_ai"]=""
+        df_langdeck_ai_temp["translation_state"]=2
+        df_langdeck_ai_temp["tr_pivot_lang"]=FILTER_PIVOT
+        df_langdeck_ai_temp["uid"]=df_langdeck_ai_temp["hash"].map(lambda x:x[:8])
+        # les champs vides sont mis à NAN
+        df_langdeck_ai_temp["translation_ai_source"] = df_langdeck_ai_temp["translation_ai_source"].map(lambda x:np.nan if x=="" else x)
+        # enreg présents dans nlp sans traduction => on supprime
+        df_corpus_nlp = df_corpus_nlp.loc[~pd.isna(df_corpus_nlp["translation_ai"])]
+        # liste des termes à traduire
+        lists=[]
+        # enreg présents dans corpus et absents dans nlp
+        df_trad_nlp = df_langdeck_ai_temp.loc[(~df_langdeck_ai_temp["pkid"].isin(df_corpus_nlp["uid"])) & (df_langdeck_ai_temp["language"]==language)]
+        lists.append(df_trad_nlp)
+        # enreg présents dans corpus avec status pending
+        df_trad_nlp = df_langdeck_ai_temp.loc[(df_langdeck_ai_temp["pending"] == "TRUE") & (df_langdeck_ai_temp["language"]==language)]
+        lists.append(df_trad_nlp)
+        df_trad_nlp = pd.concat(lists)
+        # on supprime les doublons
+        df_trad_nlp.drop_duplicates(subset="hash", inplace=True)
+        print (f"{language} {iso_code} {vc} {FILTER_PIVOT}")
+        df_trad_nlp[["translation_ai","translation_state","translation_ai_source"]] = df_trad_nlp[["translation_pivot","language","translation_state"]].apply(
+                lambda x:get_google_translation(x[0],x[1],language, iso_code, vc, FILTER_PIVOT) if int(vc)==12 else get_deepl_translation(x[0],x[1],language, iso_code, vc, FILTER_PIVOT), 
+                axis=1, 
+                result_type="expand")        
+        #df_return = call_nlp_language_vendor (FILTER_LANG, iso_code, vc, FILTER_PIVOT)
+        frames.append(df_trad_nlp)
+        #frames.append(df_return)
+
+"""algorithme : on cherche tous les enreg. de nlp
+
+START HERE
+"""
 
 # quand tout a été itéré, on concatène    
-df_langdeck_ai = pd.concat(frames)
-print (len(df_langdeck_ai))
+df_corpus_trad_ai = pd.concat(frames)
 # on uniformise le type
-df_langdeck_ai['translation_ai_source'] = df_langdeck_ai['translation_ai_source'].astype(str)
+df_corpus_trad_ai['translation_ai_source'] = df_corpus_trad_ai['translation_ai_source'].astype(str)
+df_corpus_trad_ai.drop(["pkid","pending"], axis=1, inplace=True)
+# on reconstruit l'uid
+df_corpus_trad_ai["uid"] = df_corpus_trad_ai["hash"]+df_corpus_trad_ai["translation_ai_source"]
 # on supprime les doublons
-df_langdeck_ai = df_langdeck_ai.drop_duplicates(subset=['uid'], keep='last')
+df_corpus_trad_ai = df_corpus_trad_ai.drop_duplicates(subset=['uid'], keep='last')
 # on supprime les codes ai == 0
-df_langdeck_ai = df_langdeck_ai.loc[df_langdeck_ai["translation_ai_source"]!="0"]
+df_corpus_trad_ai = df_corpus_trad_ai.loc[df_corpus_trad_ai["translation_ai_source"]!="0"]
 # par défaut état = 0
-df_langdeck_ai["translation_state"] = df_langdeck_ai["translation_state"].map(lambda x:x if int(x)!=0 else 0)
+df_corpus_trad_ai["translation_state"] = df_corpus_trad_ai["translation_state"].map(lambda x:x if int(x)!=0 else 0)
 # on enregistre dans GSheet
-save_df_to_gsheet ("t_corpus_nlp", df_langdeck_ai)
-# on positionne cette variable si une traduction pat l'AI est disponible
-df_langdeck["translation_ai_source"]=df_langdeck["hash"].apply(lambda x: len(df_langdeck_ai.loc[df_langdeck_ai["hash"]==x]))
-# on enregistre dans GSheet
-save_df_to_gsheet ("t_corpus_all_entries", df_langdeck)
+save_df_to_gsheet ("t_corpus_nlp", df_corpus_trad_ai)
 
-"""### Vue Lexique Thématique
+# on positionne cette variable si une traduction pat l'AI est disponible
+# ancienne méthode (lente) df_lgdk_corpus["translation_ai_source"]=df_lgdk_corpus["hash"].apply(lambda x: len(df_corpus_trad_ai.loc[df_corpus_trad_ai["hash"]==x]))
+grouped = df_corpus_trad_ai.groupby("hash").count().reset_index()
+grouped = grouped[["hash", "uid"]]
+grouped.rename ({"uid":"translation_ai_source"}, axis=1, inplace=True)
+df_lgdk_corpus.drop (["translation_ai_source"], axis=1, inplace=True)
+df_lgdk_corpus = pd.merge(df_lgdk_corpus, grouped, on="hash", how="left")
+# si non traduit (NAN) ==> 0
+df_lgdk_corpus["translation_ai_source"] = df_lgdk_corpus["translation_ai_source"].map(lambda x: 0 if pd.isna(x) else x )
+df_lgdk_corpus["translation_ai_source"] = df_lgdk_corpus["translation_ai_source"].astype(int)
+
+# on enregistre dans GSheet
+save_df_to_gsheet ("t_corpus_all_entries", df_lgdk_corpus)
+
+"""# Vue Lexique Thématique
 *Pour cette vue, on récupère le DF Langdeck et on extrait la liste des thèmes (l'ensemble des valeurs dans Thème1, 2, 3)
 Ensuite, on ajoute autant de colonnes que d'éléments de la liste
 Enfin, on supprime les colonnes Theme1,2,3 et on utilise pd.melt pour transposer les colonnes de thème en valeurs. On suprrme les themes = False*
 """
 
 # on crée une liste des valeurs uniques des 3 colonnes de thèmes
-frames = [df_langdeck["theme_1"],df_langdeck["theme_2"],df_langdeck["theme_3"]]
+frames = [df_lgdk_corpus["theme_1"],df_lgdk_corpus["theme_2"],df_lgdk_corpus["theme_3"]]
 vk_theme = list(set(pd.concat(frames).to_list()))
 vk_theme = [x for x in vk_theme if x == x]
 
 # on ajoute les colonnes à partir de la liste et on valorise T/F
-df_thema = df_langdeck[["hash","maitre","ordre","expression","idx","language","language_fulltext","translation","theme_1","theme_2","theme_3"]].copy()
+df_thema = df_lgdk_corpus[["hash","maitre","ordre","expression","idx","language","language_fulltext","translation","theme_1","theme_2","theme_3"]].copy()
 df_thema = pd.concat([df_thema, pd.DataFrame(columns = vk_theme)])
 for item in vk_theme:
   df_thema[item] = df_thema[["theme_1","theme_2","theme_3"]].apply(lambda x:True if (x[0]==item or x[1]==item or x[2]==item) else False, axis=1)
@@ -832,19 +889,46 @@ df_thema = df_thema.drop(["theme_1","theme_2","theme_3"], axis=1)
 df_thema = pd.melt(df_thema, id_vars=["hash","maitre","ordre","expression","idx","language","language_fulltext","translation"], 
                     var_name="thema", value_name="is_thema")
 df_thema = df_thema.loc[df_thema["is_thema"]]
+save_df_to_gsheet ("t_lex_thema", df_thema)
 
-# on enregistre dans GSheet
-try:
-  t_corpus = wb.worksheet("t_lex_thema")
-  wb.del_worksheet(t_corpus)
-except:
-  print ("Onglet inexistant !")
-  pass
-wb.add_worksheet("t_lex_thema", 1, 1)
-export_sheet = wb.worksheet("t_lex_thema")
-set_with_dataframe(export_sheet, df_thema)
+"""# Vocabulaire EC"""
 
-"""### Traductions IA pour les EDC
+#---- Chargement table Airtable EC_Content dans un DF
+vk_at_ecc = Airtable(base_id, 'EC_Content', api_key_airtable).get_all(view='CR',sort='ID1')
+df_vkat_ecc = pd.DataFrame.from_records((r['fields'] for r in vk_at_ecc))
+# on transpose les listes de mots
+df_vkat_ecc=df_vkat_ecc.explode("Vocabulaire")
+# on récupère les valeurs à partir du ID record
+df_vkat_ecc["vocabulary_unit"] = df_vkat_ecc["Vocabulaire"].map(lambda x:airtable.get(x)["fields"]["vocabulary_unit"] if not pd.isna(x) else "")
+df_vkat_ecc["headword"] = df_vkat_ecc["Vocabulaire"].map(lambda x:airtable.get(x)["fields"]["lemma"] if not pd.isna(x) else "")
+# chargement de la table des contenus EC (FR)
+df_ec_content_fr = load_df_from_gsheet("t_ec_content_fr")
+# onb récupère les données avec la clé (phraseFR)
+df_vkat_ecc=pd.merge(df_vkat_ecc, df_ec_content_fr [["PhraseFR","ID","EC_Key"]], left_on="Phrase", right_on="PhraseFR", how="left")
+
+df_vocab = load_df_from_gsheet ("t_ec_vocabulary")
+# la clé est double : EC_KeyFR + Vocabulaire - ID + vocabulary_unit
+df_vkat_ecc.drop(["Vocabulaire","ID1","ID2","EC","EC_Key","Locuteur","Phrase","PhraseFR"], axis=1, inplace=True)
+df_vkat_ecc.rename({"vocabulary_unit":"Vocabulaire","ID":"EC_KeyFR"}, axis=1, inplace=True)
+
+# df_vkat_ecc = df_vkat_ecc.loc[df_vkat_ecc["Vocabulaire"]!=""]
+
+import hashlib
+# on créé une clé unique
+df_vkat_ecc["PKID"]=df_vkat_ecc[["EC_KeyFR","Vocabulaire"]].apply(lambda x:x[0]+"-"+str(int(hashlib.sha1((x[0]+x[1]).encode("utf-8")).hexdigest(), 16) % (10 ** 8)), axis=1)
+#on vire les lignes sans vocabulaire
+df_vkat_ecc=df_vkat_ecc.loc[df_vkat_ecc["Vocabulaire"].str.len() > 0]
+# on concatène
+frames=[]
+frames.append(df_vocab)
+frames.append(df_vkat_ecc)
+df_vocab = pd.concat(frames)
+# on vire les doublons
+df_vocab.drop_duplicates(subset="PKID", inplace=True)
+
+
+
+"""# Traductions IA pour les EDC
 
 On charge la table t_ec_content_trad et on créé une table des propositions  comme t_corpus_nlp
 """
