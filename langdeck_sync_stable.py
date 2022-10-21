@@ -582,18 +582,7 @@ def get_airt_lemma():
   df_vk = pd.DataFrame.from_records((r['fields'] for r in vk))
   df_vk.drop_duplicates(subset=['vocabulary_unit'], inplace=True)
   return df_vk
-
-# table Corpus Airtable vue Lemme
-df_airt_lemma = get_airt_lemma()
-### on charge la table t_corpus_head
-df_corpus_head = load_df_from_gsheet ("t_corpus_head")
-df_corpus_head.drop_duplicates(subset=['terme_pref'], inplace=True) 
-# Double DIFF
-# on vire ce qui n'est plus dans Airtable
-df_corpus_head.drop(df_corpus_head[~df_corpus_head["terme_pref"].isin(df_lgdk_corpus["maitre"])].index, inplace=True) 
-# on vire ce qui n'est plus dans GSheet
-df_head_lines = df_airt_lemma[(df_airt_lemma["vocabulary_unit"].isin(df_corpus_head["terme_pref"])) & (df_airt_lemma["headword"]==True)]
-
+  
 def f_content_head(lemma):
   df_f = df_airt_lemma.loc[df_airt_lemma["lemma"]==lemma].sort_values(by=['rank'])
   definition = df_corpus_head.loc[df_corpus_head["terme_pref"]==lemma]["definition"].drop_duplicates().values.item()
@@ -625,6 +614,19 @@ def f_update_head(lemma):
   r3 = f_content_head(lemma)
 
   return pd.Series([r1, r2, r3])
+
+# table Corpus Airtable vue Lemme
+df_airt_lemma = get_airt_lemma()
+### on charge la table t_corpus_head
+df_corpus_head = load_df_from_gsheet ("t_corpus_head")
+df_corpus_head.drop_duplicates(subset=['terme_pref'], inplace=True) 
+# Double DIFF
+# on vire ce qui n'est plus dans Airtable
+df_corpus_head.drop(df_corpus_head[~df_corpus_head["terme_pref"].isin(df_lgdk_corpus["maitre"])].index, inplace=True) 
+# on vire ce qui n'est plus dans GSheet
+df_head_lines = df_airt_lemma[(df_airt_lemma["vocabulary_unit"].isin(df_corpus_head["terme_pref"])) & (df_airt_lemma["headword"]==True)]
+
+
 
 """### Ajout des nouveaux lemmes"""
 
@@ -944,19 +946,119 @@ save_df_to_gsheet ("t_ec_vocabulary", df_vocab)
 On charge la table t_ec_content_trad et on créé une table des propositions  comme t_corpus_nlp
 """
 
-FILTER_LANG
+def translate (term, lang_src, lang_dst):
+  from deep_translator import GoogleTranslator
+  try:
+    translation = GoogleTranslator(source=lang_src, target=lang_dst).translate(term)
+    print(translation)
+  except Exception as e:
+    print (e)
+    translation = np.nan
+    pass
+  return translation
 
-df_ec_trad = load_df_from_gsheet ("t_ec_content_trad")
-df_ec_meta = load_df_from_gsheet ("t_ec_meta")
-df_ec_ct_substitute = load_df_from_gsheet ("t_ec_ct_substitute")
+FILTER_LANG = ["ita","ger"]
+FILTER_PIVOT = "en"
+FILTER_EC = ["EC23","EC24","EC14"]
 df_ec_nlp = load_df_from_gsheet ("t_corpus_nlp")
 # on vide le contenu, on conserve le gabarit
-df_ec_nlp.drop(df_ec_nlp.index,inplace=True) 
-
+df_ec_nlp.drop(df_ec_nlp.index, inplace=True) 
+df_ec_trad = load_df_from_gsheet ("t_ec_content_trad")
+df_ec_trad.drop(df_ec_trad.index, inplace=True)
 df_ec_fr = load_df_from_gsheet ("t_ec_content_fr")
+
+# on filtre sur les EC
+df_ec_fr = df_ec_fr.loc[df_ec_fr["EC_Key"].isin(FILTER_EC)]
+#on complète le schéma
+df_ec_fr["PhraseEN"]=df_ec_fr["PhraseEN"].map(lambda x:np.nan if x=="" else x)
 df_ec_fr["translation_pivot_fr"]=df_ec_fr["PhraseFR"]
-df_ec_fr["translation_pivot_en"]=pd.NA
+df_ec_fr["translation_pivot_en"]=df_ec_fr[["PhraseEN","PhraseFR"]].apply(lambda x:translate (x[1],"fr","en") if (pd.isna(x[0]) or x[0]=="") else x[0], axis=1)
 df_ec_fr["translation_pivot"]=df_ec_fr[["translation_pivot_fr","translation_pivot_en"]].apply(lambda x:x[0] if FILTER_PIVOT=="fr" else x[1] , axis=1)
+df_ec_fr["PhraseEN"]=df_ec_fr["translation_pivot_en"]
+# on réserve pour la suite
+df_ec_content_work = df_ec_fr.copy()
+# on sauvegarde le strict nécessaire
+df_ec_fr = df_ec_fr[["ID","PhraseFR","PhraseEN","AudioFR","EC_Key","Locuteur","Sens"]]
+save_df_to_gsheet ("t_ec_content_fr", df_ec_fr)
+
+# df de travail
+df_ec_content_work = pd.concat([df_ec_content_work, pd.DataFrame(columns=FILTER_LANG)], axis=1)
+
+# on fond les colonnes de langues dans la matrice
+df_ec_content_work = pd.melt(df_ec_content_work,
+                         id_vars=["ID", "PhraseFR","PhraseEN","AudioFR","EC_Key","Locuteur","Sens","translation_pivot_fr","translation_pivot_en","translation_pivot"],
+                         var_name="language",
+                         value_name="translation")
+df_ec_content_work["id_trad"]=df_ec_content_work[["ID","language"]].apply(lambda x:x[0][:5] + x[1].upper() + "-" + x[0][9:], axis=1)
+# chargement des traductions de EC
+df_ec_trad = load_df_from_gsheet ("t_ec_content_trad")
+df_ec_content_work.rename({"ID":"uid","id_trad":"ID"}, axis=1, inplace=True)
+# mieux qu'un loc : on merge pour récupérer les traductions si elles existent ou NAN sinon
+df_ec_content_work = pd.merge(df_ec_content_work, df_ec_trad[["ID","translation_ai"]], on="ID", how="left")
+
+df_ec_content_work
+
+# on charge les traductions puis on vide le contenu
+df_ec_trad_work = df_ec_trad.copy()
+df_ec_trad_work.drop(df_ec_trad_work.index, inplace=True)
+# on aligne le df de travail avec le df de traductions
+df_ec_content_work = pd.concat([df_ec_content_work, pd.DataFrame(columns=['PhraseTR','AudioTR', 'AudioTR_AI', 'translation_ai_source'])], axis=1)
+df_ec_content_work = df_ec_content_work[["ID","uid","PhraseFR","PhraseTR","AudioFR","AudioTR","AudioTR_AI","EC_Key","Locuteur","Sens","translation_pivot_fr","translation_pivot_en","translation_pivot","translation_ai_source","translation_ai","language"]]
+# on ajoute les traductions rejetées
+df_ec_content_work = pd.concat([df_ec_content_work,df_ec_trad.loc[df_ec_trad["translation_ai_source"]=="3"]])
+df_ec_content_work["translation_pivot_en"] = df_ec_content_work[["translation_pivot_en","PhraseFR"]].apply(lambda x:translate (x[1],"fr","en") if (pd.isna(x[0]) or x[0]=="") else x[0], axis=1)
+df_ec_content_work["translation_pivot"] = df_ec_content_work[["translation_pivot_fr","translation_pivot_en"]].apply(lambda x:x[0] if FILTER_PIVOT=="fr" else x[1] , axis=1)
+
+df_iso = load_df_from_gsheet ("t_on_languages")
+df_ec_content_work = df_ec_content_work.loc[pd.isna(df_ec_content_work["translation_ai_source"])]
+
+def translate_iso (term, lang_src, lang_dst, id):
+  iso_dest = df_iso.loc[df_iso["trigramme"]==lang_dst]["iso-code"].values.item()
+  print (f"Traduction de {id} : {term} de {lang_src} vers {iso_dest} ")
+  trad = translate(term, lang_src, iso_dest)
+  return trad
+
+# on appelle la traduction si NAN, sinon rien
+df_ec_content_work["translation_ai"] = df_ec_content_work[["translation_ai","translation_pivot","language","ID"]].apply(lambda x:translate_iso(x[1],FILTER_PIVOT,x[2],x[3]) if (pd.isna(x[0]) or x[0]=="") else x[0], axis=1)
+
+df_ec_content_work["EC_KeyFR"] = df_ec_content_work["uid"]
+df_ec_content_work["PhraseTR"] = df_ec_content_work["translation_ai"]
+df_ec_content_work["AudioTR"] = df_ec_content_work["ID"].map(lambda x: "Files_Files_/assets/audio/tts/" + x + ".mp3") 
+df_ec_content_work["AudioTR_AI"] = df_ec_content_work["ID"].map(lambda x: "Files_Files_/assets/audio/tts/" + x + ".mp3") 
+df_ec_content_work["translation_ai_source"] = 0
+df_ec_content_work.drop(["uid"], axis=1, inplace = True)
+df_ec_content_work = df_ec_content_work[["ID","EC_KeyFR","PhraseFR","PhraseTR","AudioFR","AudioTR","AudioTR_AI","EC_Key","Locuteur","Sens","translation_pivot_fr","translation_pivot_en","translation_pivot","translation_ai_source","translation_ai"]]
+df_ec_content_work["EC_Key"] = df_ec_content_work["ID"].map(lambda x:x[:8])
+# on concatène et on sauvegarde
+df_ec_trad = pd.concat([df_ec_trad, df_ec_content_work])
+save_df_to_gsheet ("t_ec_content_trad", df_ec_trad)
+
+"""## Mise à jour du catalogue des EC avec traductions (ec_bylang)"""
+
+# Il faut mettre à jour la table de correspondance des EC t_ec_bylang
+df_ec_index = pd.DataFrame()
+df_ec_index["ID"]=df_ec_trad["EC_Key"].drop_duplicates()
+df_ec_index["EC_Key"]=df_ec_index["ID"].map(lambda x:x[:4])
+df_ec_index = pd.merge(df_ec_index, df_ec_meta[["ID","Nom"]], how="left", left_on="EC_Key", right_on="ID")
+df_ec_index.rename(columns={"ID_x":"ID","Nom":"EC_Desc"}, inplace=True)
+df_ec_index.drop('ID_y', axis=1, inplace=True)
+df_ec_index["Language_code"]=df_ec_index["ID"].map(lambda x:x[5:].lower())
+df_ec_index["code_2d"] = df_ec_index["Language_code"].map(lambda x: df_iso.loc[df_iso["trigramme"]==x]["iso-code"].values.item()) 
+df_ec_index["Language"] = df_ec_index["Language_code"].map(lambda x: df_iso.loc[df_iso["trigramme"]==x]["language"].values.item()) 
+df_ec_index["Interpret"] = pd.NA
+df_ec_index = pd.merge(df_ec_index, df_ec_meta[["ID","Cover"]], how="left", left_on="EC_Key", right_on="ID")
+df_ec_index.drop('ID_y', axis=1, inplace=True)
+df_ec_index.rename(columns={"ID_x":"ID","Nom":"EC_Desc"}, inplace=True)
+save_df_to_gsheet ("t_ec_bylang", df_ec_index)
+
+"""# FIN pour l'instant !"""
+
+df_ec_meta = load_df_from_gsheet ("t_ec_meta")
+df_ec_ct_substitute = load_df_from_gsheet ("t_ec_ct_substitute")
+
+
+
+
 # clé EDC+TRAD
 df_ec_fr["id_trad"]=df_ec_fr["ID"].apply(lambda x:x[:5] + FILTER_LANG.upper() + "-" + x[9:])
 # nombre de trad IA disponibles pour chaque clé
@@ -967,7 +1069,12 @@ df_ec_fr["AudioTR_AI"]=pd.NA
 df_ec_fr.rename(columns={"ID":"EC_KeyFR","id_trad":"ID"}, inplace=True)
 
 FILTER_PIVOT = "fr"
-FILTER_LANG = "alb"
+FILTER_LANG = "ita"
+FILTER_EC = "EC24"
+
+df_ec_fr = pd.concat([df_ec_fr, pd.DataFrame(columns=FILTER_LANG)], axis=1)
+
+pd.Series(FILTER_LANG)
 
 """#### On a dans A toutes les EC en Fr et dans B les traductions existantes en RUS
 On complète les traductions manquantes par appel IA
@@ -984,7 +1091,11 @@ frames.append(df_newlines)
 frames.append(df_kolines)
 df_ec_trad = pd.concat(frames)
 
-df_ec_fr.tail()
+pd.DataFrame(columns=FILTER_LANG)
+
+pd.DataFrame(FILTER_LANG).T.unstack()
+
+
 
 df_ec_fr.iloc[1]
 
